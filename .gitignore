@@ -1,0 +1,10 @@
+# Your own Mixamo character — Mixamo's licence doesn't allow redistributing it, so never commit it.
+models/*.glb
+models/*.fbx
+models/*.gltf
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
