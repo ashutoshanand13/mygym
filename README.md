@@ -6,6 +6,8 @@ exercise guides with an **animated 3D figure**, a workout logger with a rest tim
 
 No account, no server, no tracking — everything is stored in your browser.
 
+**▶ Try it: <https://ashutoshanand13.github.io/mygym/>** — on iPhone, tap Share → *Add to Home Screen*.
+
 ## Features
 
 - **Personal plan from a 1-minute setup** — what you own (dumbbell weights or none, chair, mat, table,
