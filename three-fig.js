@@ -7,7 +7,8 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const UP = V(0, 1, 0), FWD = V(0, 0, 1);
 
-export async function createViewer(canvas) {
+// opts.customUrl / opts.customExt: the user's own character (see character.js), tried first.
+export async function createViewer(canvas, opts = {}) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
@@ -43,21 +44,23 @@ export async function createViewer(canvas) {
   // own textures. Otherwise the X Bot mannequin is dressed up as a bearded man in code below.
   const url = (p) => new URL(p, import.meta.url).href;
   let model, custom = false;
-  // Prefer models/man.glb (made from a Mixamo FBX with tools/convert-fbx.html), then a raw models/man.fbx.
-  for (const file of ["man.glb", "man.fbx"]) {
+  // Sources in priority order: the user's own upload (kept in this browser), then models/man.* if a copy
+  // sits in the project folder (local development only; git-ignored), then the default mannequin below.
+  const sources = [];
+  if (opts.customUrl) sources.push({ src: opts.customUrl, ext: opts.customExt || "glb" });
+  for (const f of ["man.glb", "man.fbx"]) sources.push({ src: url("./models/" + f), ext: f.slice(-3), local: true });
+  for (const s of sources) {
     try {
-      const r = await fetch(url("./models/" + file), { method: "HEAD" });
-      if (!r.ok) continue;
-      if (file.endsWith(".glb")) model = (await new GLTFLoader().loadAsync(url("./models/" + file))).scene;
-      else {
+      if (s.local && !(await fetch(s.src, { method: "HEAD" })).ok) continue;
+      if (s.ext === "fbx") {
         const { FBXLoader } = await import("three/addons/loaders/FBXLoader.js");
-        model = await new FBXLoader().loadAsync(url("./models/" + file));
-      }
+        model = await new FBXLoader().loadAsync(s.src);
+      } else model = (await new GLTFLoader().loadAsync(s.src)).scene;
       const h = new THREE.Box3().setFromObject(model).getSize(V()).y;
       model.scale.multiplyScalar(1.8 / h);
       custom = true;
       break;
-    } catch (e) { console.warn("Could not load", file, e); model = null; }
+    } catch (e) { console.warn("Could not load character", s.ext, e); model = null; }
   }
   // Default figure: the X Bot mannequin from the three.js examples (a Mixamo character), loaded from the CDN
   // rather than shipped in this repo.

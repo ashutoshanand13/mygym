@@ -9,8 +9,8 @@ const ALL_DBS = [1, 2, 3, 4, 5, 6, 7.5, 8, 10, 12.5, 15, 17.5, 20];
 
 function defaultState() {
   return {
-    settings: { dumbbells: [2, 3, 5], startDate: ymd(), days: [1, 3, 5], bodyweight: "" },
-    sessions: [], checkins: [], draft: null
+    settings: { dumbbells: [2, 3, 5], startDate: ymd(), days: [1, 3, 5], bodyweight: "", name: "", emoji: "💪" },
+    sessions: [], checkins: [], draft: null, friends: []
   };
 }
 let state;
@@ -79,7 +79,7 @@ function suggest(item, plannedSets) {
 }
 
 // ---------- rendering ----------
-const views = { today: renderToday, plan: renderPlan, exercises: renderExercises, progress: renderProgress, settings: renderSettings };
+const views = { today: renderToday, plan: renderPlan, exercises: renderExercises, progress: renderProgress, friends: renderFriends, settings: renderSettings };
 function route() {
   const tab = (location.hash || "#today").slice(1);
   const onboarding = !state.settings.onboarded || tab === "setup";
@@ -93,11 +93,11 @@ window.addEventListener("hashchange", route);
 
 function startDraft(letter) {
   const week = weekNum(), phase = phaseFor(week);
-  const items = P().W[letter].items;
+  const items = P().W[letter].items, dose = todayDose().level;
   state.draft = {
-    date: ymd(), workout: letter, week, started: Date.now(), items,
+    date: ymd(), workout: letter, week, started: Date.now(), items, dose,
     entries: items.map((item, i) => {
-      const n = setsFor(item, i, phase);
+      const n = doseSets(setsFor(item, i, phase), i, dose);
       const s = suggest(item, n);
       return { id: item.id, sets: Array.from({ length: n }, () => ({ w: s.w, reps: s.reps, done: false })) };
     })
@@ -117,25 +117,24 @@ function renderToday(el) {
     <h1>${fmtDate(today)}</h1><p class="muted">${phase.rir}</p></div>
     <div class="ring">${weekProgressRing()}</div></section>`;
 
+  if (!state.draft) html += coachCard();
   if (state.draft) {
     html += renderDraft();
   } else if (doneToday.length) {
     html += `<div class="card ok"><h2>✅ Workout ${doneToday[0].workout} done today</h2>
       <p>${sessionVolume(doneToday[0]).toLocaleString()} kg lifted in ${doneToday[0].minutes} min. Recover well — next up is Workout ${nextLetter()}.</p></div>`;
-    html += renderCheckin();
   } else {
     html += `<div class="card">
       <div class="eyebrow">${isTrainingDay ? "Training day" : "Rest day"}</div>
       <h2>${W.title}</h2>
       <p class="muted">${phase.note}</p>
       <ol class="preview">${W.items.map((it, i) => {
-        const ex = EXERCISES[it.id], n = setsFor(it, i, phase), s = suggest(it, n);
+        const ex = EXERCISES[it.id], n = doseSets(setsFor(it, i, phase), i, todayDose().level), s = suggest(it, n);
         return `<li><span>${ex.icon} ${ex.name}</span><span class="pill">${n} × ${it.min}–${it.max}${ex.type === "time" ? "s" : ""}${ex.perSide ? "/side" : ""} · ${s.w ? kgLabel(s.w) : "bodyweight"}</span>${it.note ? `<div class="small muted eqnote">${it.note}</div>` : ""}</li>`;
       }).join("")}</ol>
       <details class="warm"><summary>Warm-up (5 min)</summary><ul>${WARMUP.map((w) => `<li>${w}</li>`).join("")}</ul></details>
       <button class="primary big" data-act="start" data-l="${letter}">${isTrainingDay ? "Start workout" : "Train anyway"}</button>
     </div>`;
-    if (!isTrainingDay) html += renderCheckin();
   }
   el.innerHTML = html;
   bindToday(el);
@@ -147,7 +146,7 @@ function renderDraft() {
   const done = d.entries.reduce((a, e) => a + e.sets.filter((s) => s.done).length, 0);
   const total = d.entries.reduce((a, e) => a + e.sets.length, 0);
   return `<div class="progressbar"><div style="width:${(done / total) * 100}%"></div></div>
-  <p class="muted small">${done}/${total} sets · ${W.title}</p>
+  <p class="muted small">${done}/${total} sets · ${W.title}${d.dose && d.dose !== "standard" ? ` · <b>${d.dose === "big" ? "push day" : "easy day"}</b>` : ""}</p>
   <div class="excards">${d.entries.map((e, ei) => {
     const ex = EXERCISES[e.id], item = W.items[ei], s = suggest(item, e.sets.length);
     const unit = ex.type === "time" ? "sec" : "reps";
@@ -171,17 +170,92 @@ function renderDraft() {
   <div class="row"><button class="ghost" data-act="cancel">Discard</button><button class="primary big" data-act="finish">Finish workout</button></div>`;
 }
 
-function renderCheckin() {
-  const c = state.checkins.find((x) => x.date === ymd()) || {};
-  return `<div class="card"><h2>Daily check-in</h2>
-    <div class="grid2">
-      <label class="tog"><input type="checkbox" id="ci-walk" ${c.walk ? "checked" : ""}> Walked 20+ min</label>
-      <label class="tog"><input type="checkbox" id="ci-protein" ${c.protein ? "checked" : ""}> Hit protein goal</label>
-      <label>Sleep (h)<input type="number" step="0.5" id="ci-sleep" value="${c.sleep ?? ""}"></label>
-      <label>Bodyweight (kg)<input type="number" step="0.1" id="ci-bw" value="${c.bw ?? ""}"></label>
-      <label class="span2">Soreness <input type="range" min="1" max="5" id="ci-sore" value="${c.sore ?? 2}"><span class="muted small">1 = fresh · 5 = very sore</span></label>
+// ---------- walking + today's lifting dose (the daily coach) ----------
+const WALK_GOAL = { fit: { day: 30, week: 150 }, muscle: { day: 20, week: 90 } };
+const checkinFor = (date) => state.checkins.find((c) => c.date === date) || {};
+const walkMin = (c) => (c.walkMin != null ? c.walkMin : c.walk ? 20 : 0); // old boolean check-ins still count
+const goalLabel = (g) => (g === "fit" ? "Get fit & lose fat" : "Build muscle");
+function walkedLastDays(k) {
+  let tot = 0;
+  for (const c of state.checkins) {
+    const d = Math.round((parseYmd(ymd()) - parseYmd(c.date)) / 86400000);
+    if (d >= 0 && d < k) tot += walkMin(c);
+  }
+  return tot;
+}
+const doseSets = (n, i, dose) => (dose === "light" ? Math.max(2, n - 1) : dose === "big" && i < 3 ? n + 1 : n);
+
+// What to lift today, from your goal, what you walked, sleep and soreness.
+function todayDose() {
+  const s = state.settings, goal = s.goal || "muscle", c = checkinFor(ymd());
+  const walked = walkMin(c), t = WALK_GOAL[goal], sore = c.sore ?? 2, sleep = c.sleep ?? null;
+  const restDay = !s.days.includes(new Date().getDay());
+  const remaining = Math.max(0, t.day - walked);
+  let walkMsg;
+  if (goal === "fit") walkMsg = remaining === 0 ? "Walk goal reached for today 🎉" : `${remaining} more min of walking reaches today's ${t.day}-min goal.`;
+  else walkMsg = remaining === 0 ? "Walking goal reached — good for heart and recovery." : `Walking is a bonus for muscle: ${remaining} more min is nice, not required.`;
+  if (restDay) walkMsg = "Rest day: walking is your main job today. " + walkMsg;
+
+  if (sore >= 4 || (sleep !== null && sleep > 0 && sleep < 6)) {
+    return { level: "light", title: "Easy day: one set less per move", tone: "warn", walkMsg,
+      msg: sore >= 4 ? "You're very sore. Lighter lifting now means you recover faster and keep the streak." : "Under 6 hours of sleep. Keep the effort controlled and aim for an earlier night." };
+  }
+  if ((goal === "fit" && walked >= t.day) || (goal === "muscle" && walked >= 10 && sleep >= 7 && sore <= 2)) {
+    return { level: "big", title: "Push day: +1 set on your first 3 moves", tone: "up", walkMsg,
+      msg: goal === "fit" ? "You've hit your walk goal, so today's lifting can go a notch higher to keep the fat-loss going." : "Good sleep and fresh legs — a little extra work will help you grow." };
+  }
+  return { level: "standard", title: "Standard day: the full plan", tone: "", walkMsg,
+    msg: goal === "fit" ? "Do the full plan today. Walking adds the calorie burn that helps you lose fat." : "Do the full plan today and keep the reps honest." };
+}
+
+function coachCard() {
+  const c = checkinFor(ymd()), d = todayDose(), goal = state.settings.goal || "muscle", t = WALK_GOAL[goal];
+  const walked = walkMin(c), pct = Math.min(100, Math.round((walked / t.day) * 100));
+  return `<section class="card coach">
+    <div class="ex-head"><div><div class="eyebrow">Today's coach</div><h2>${d.title}</h2></div><span class="pill">${goalLabel(goal)}</span></div>
+    <p class="tip ${d.tone}">${d.msg}</p>
+    <div class="walkbox">
+      <div class="ex-head"><b>Walk today</b><span class="small muted">${walked} / ${t.day} min</span></div>
+      <div class="progressbar"><div style="width:${pct}%"></div></div>
+      <div class="walkbtns">
+        <button class="ghost" data-act="walk" data-m="10">+10 min</button>
+        <button class="ghost" data-act="walk" data-m="20">+20 min</button>
+        <button class="ghost" data-act="walk" data-m="30">+30 min</button>
+        <label class="walkin">Minutes<input type="number" inputmode="numeric" min="0" max="300" value="${walked}" data-ci="walkMin"></label>
+      </div>
+      <p class="small muted">${d.walkMsg} Last 7 days: ${walkedLastDays(7)} min${goal === "fit" ? ` · weekly goal ${t.week}` : ""}.</p>
     </div>
-    <button class="primary" data-act="checkin">${c.date ? "Update" : "Save"} check-in</button></div>`;
+    <div class="grid2 coachgrid">
+      <label>Sleep (hours)<input type="number" step="0.5" min="0" max="16" value="${c.sleep ?? ""}" data-ci="sleep"></label>
+      <label>Soreness <span class="muted small">1 fresh · 5 very sore</span><input type="range" min="1" max="5" value="${c.sore ?? 2}" data-ci="sore"></label>
+      <label>Bodyweight (kg)<input type="number" step="0.1" value="${c.bw ?? ""}" data-ci="bw"></label>
+      <label class="tog"><input type="checkbox" data-ci="protein" ${c.protein ? "checked" : ""}> Hit my protein goal</label>
+    </div>
+  </section>`;
+}
+
+function saveCi(t) {
+  const d = ymd();
+  let c = state.checkins.find((x) => x.date === d);
+  if (!c) { c = { date: d }; state.checkins.push(c); }
+  const k = t.dataset.ci;
+  if (k === "walkMin") c.walkMin = Math.max(0, Math.min(300, Math.round(+t.value || 0)));
+  if (k === "sleep") c.sleep = num(t.value);
+  if (k === "sore") c.sore = +t.value;
+  if (k === "bw") { c.bw = num(t.value); if (c.bw) state.settings.bodyweight = c.bw; }
+  if (k === "protein") c.protein = t.checked;
+  save();
+  const y = window.scrollY; renderToday($("#view")); window.scrollTo(0, y);
+  toast("Saved", 900);
+}
+function addWalk(m) {
+  const d = ymd();
+  let c = state.checkins.find((x) => x.date === d);
+  if (!c) { c = { date: d }; state.checkins.push(c); }
+  c.walkMin = walkMin(c) + m;
+  save();
+  const y = window.scrollY; renderToday($("#view")); window.scrollTo(0, y);
+  toast(`+${m} min walk logged 🚶`, 1500);
 }
 
 function bindToday(el) {
@@ -202,15 +276,12 @@ function bindToday(el) {
     }
     if (act === "cancel" && confirm("Discard this workout?")) { state.draft = null; save(); route(); }
     if (act === "finish") finishWorkout();
-    if (act === "checkin") {
-      const c = { date: ymd(), walk: $("#ci-walk").checked, protein: $("#ci-protein").checked, sleep: num($("#ci-sleep").value), bw: num($("#ci-bw").value), sore: +$("#ci-sore").value };
-      state.checkins = state.checkins.filter((x) => x.date !== c.date).concat(c);
-      if (c.bw) state.settings.bodyweight = c.bw;
-      save(); toast("Check-in saved"); route();
-    }
+    if (act === "walk") addWalk(+b.dataset.m);
   };
   el.onchange = (ev) => {
-    const t = ev.target; if (!t.dataset.f || !state.draft) return;
+    const t = ev.target;
+    if (t.dataset.ci) return saveCi(t);
+    if (!t.dataset.f || !state.draft) return;
     const sets = state.draft.entries[t.dataset.e].sets, si = +t.dataset.s;
     const v = +t.value;
     sets[si][t.dataset.f] = v;
@@ -461,6 +532,10 @@ function renderSettings(el) {
     <p class="muted small">Training days (3 recommended, with a rest day between):</p>
     <div class="chips">${DAY_NAMES.map((d, i) => `<label class="chip"><input type="checkbox" value="${i}" data-day ${st.days.includes(i) ? "checked" : ""}><span>${d}</span></label>`).join("")}</div>
     <label>Bodyweight (kg)<input type="number" step="0.1" id="s-bw" value="${st.bodyweight ?? ""}"></label></div>
+  <div class="card"><h2>My 3D character</h2>
+    <p class="muted small">${window.CHAR_NAME ? `Using your own model: <b>${esc(window.CHAR_NAME)}</b>. It's kept only in this browser and never uploaded.` : "The app shows the default mannequin. Upload your own Mixamo character (.glb or .fbx) to use a realistic person. It's kept only in this browser and never uploaded."}</p>
+    <div class="row"><label class="ghost btnlike">Upload character<input type="file" id="s-char" accept=".glb,.gltf,.fbx" hidden></label>${window.CHAR_NAME ? `<button class="ghost" id="s-char-reset">Use default</button>` : ""}</div>
+    <p class="small muted">Get one free at mixamo.com. Mixamo lets you use its characters in your own projects, but not share the files, so keep this to your own device.</p></div>
   <div class="card"><h2>Backup</h2><p class="muted small">Data is stored only in this browser. Export now and then so you don't lose it.</p>
     <div class="row"><button class="ghost" id="s-export">Export JSON</button><label class="ghost btnlike">Import JSON<input type="file" accept=".json" id="s-import" hidden></label>
     <button class="danger" id="s-reset">Reset everything</button></div></div>`;
@@ -469,6 +544,11 @@ function renderSettings(el) {
     if (e.target.matches("[data-day]")) st.days = [...el.querySelectorAll("[data-day]:checked")].map((i) => +i.value);
     if (e.target.id === "s-start" && e.target.value) st.startDate = e.target.value;
     if (e.target.id === "s-bw") st.bodyweight = num(e.target.value);
+    if (e.target.id === "s-char" && e.target.files[0]) {
+      const f = e.target.files[0];
+      if (f.size > 120 * 1048576) return alert("That file is over 120 MB. Convert it to a smaller .glb first (tools/convert-fbx.html).");
+      return window.CharStore.saveCharacter(f).then(() => location.reload(), () => alert("Couldn't save the character in this browser."));
+    }
     if (e.target.id === "s-import" && e.target.files[0]) {
       e.target.files[0].text().then((t) => { try { state = Object.assign(defaultState(), JSON.parse(t)); save(); toast("Imported"); route(); } catch { alert("That file isn't a valid backup."); } });
     }
@@ -480,6 +560,7 @@ function renderSettings(el) {
     a.download = `firstrep-backup-${ymd()}.json`; a.click();
   };
   $("#s-reset").onclick = () => { if (confirm("Delete all workouts, check-ins and settings? This cannot be undone.")) { state = defaultState(); save(); route(); } };
+  $("#s-char-reset")?.addEventListener("click", () => window.CharStore.clearCharacter().then(() => location.reload()));
 }
 
 // ---------- first-time setup (onboarding) ----------
@@ -574,6 +655,116 @@ function renderOnboarding(el) {
     if (t.matches("[data-nodb]")) { o.noDb = t.checked; if (o.noDb) o.dumbbells = []; rerender(); }
     if (t.id === "ob-bp") o.backpackKg = Math.max(1, +t.value || 5);
     if (t.id === "ob-bw") o.bodyweight = num(t.value) ?? "";
+  };
+}
+
+// ---------- profile + friends (no server: you swap share codes) ----------
+const EMOJIS = ["💪", "🏋️", "🔥", "🦁", "🚀", "🌟", "🐯", "🧘", "🏃", "🦅", "🐻", "⚡"];
+const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const b64u = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = (s) => decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(s.length / 4) * 4, "="))));
+function profileId() {
+  if (!state.settings.profileId) { state.settings.profileId = Math.random().toString(36).slice(2, 10); save(); }
+  return state.settings.profileId;
+}
+function ago(ts) {
+  const m = Math.round((Date.now() - ts) / 60000);
+  if (m < 2) return "just now";
+  if (m < 60) return m + " min ago";
+  const h = Math.round(m / 60);
+  if (h < 24) return h + " h ago";
+  const d = Math.round(h / 24);
+  return d === 1 ? "yesterday" : d + " days ago";
+}
+function lastAgo(dateStr) {
+  const d = Math.round((parseYmd(ymd()) - parseYmd(dateStr)) / 86400000);
+  return d === 0 ? "today" : d === 1 ? "yesterday" : d + " days ago";
+}
+// The share code holds only these numbers — no bodyweight, sleep, soreness or notes.
+function myCode() {
+  const S = state.sessions, s = state.settings, done = new Set(S.map((x) => x.date));
+  let d14 = "";
+  for (let i = 13; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); d14 += done.has(ymd(d)) ? "1" : "0"; }
+  const last = S.length ? S.map((x) => x.date).sort().at(-1) : "";
+  const weekDone = S.filter((x) => weekNum(x.date) === weekNum()).length;
+  const payload = {
+    v: 1, id: profileId(), n: (s.name || "Me").slice(0, 24), e: s.emoji || "💪", g: s.goal || "muscle",
+    ws: weekDone, wt: s.daysPerWeek || (s.days || []).length || 3, st: weekStreak(),
+    tv: S.reduce((a, x) => a + sessionVolume(x), 0), tm: S.reduce((a, x) => a + x.minutes, 0),
+    w7: walkedLastDays(7), last, d14, ts: Date.now()
+  };
+  return "FR1." + b64u(JSON.stringify(payload));
+}
+function parseCode(text) {
+  const m = String(text).trim().match(/FR1\.([A-Za-z0-9_-]+)/);
+  if (!m) throw new Error("That isn't a FirstRep code.");
+  const o = JSON.parse(unb64u(m[1]));
+  if (o.v !== 1 || !o.id) throw new Error("That code is out of date or damaged.");
+  return o;
+}
+function friendCard(f) {
+  const o = f.data, stale = Date.now() - o.ts > 2 * 86400000;
+  const dots = (o.d14 || "").split("").map((c) => `<i class="${c === "1" ? "w" : ""}"></i>`).join("");
+  const tv = o.tv >= 1000 ? (o.tv / 1000).toFixed(1) + "t" : o.tv + " kg";
+  return `<div class="card friend">
+    <div class="fhead"><span class="av">${esc(o.e)}</span>
+      <div class="fname"><b>${esc(o.n)}</b><div class="small muted">${goalLabel(o.g)} · updated ${ago(o.ts)}</div></div>
+      <button class="link" data-unfriend="${esc(o.id)}">Remove</button></div>
+    <div class="stats fstats">
+      <div class="stat"><b>${o.ws}/${o.wt}</b><span>workouts this week</span></div>
+      <div class="stat"><b>${o.st}</b><span>week streak</span></div>
+      <div class="stat"><b>${tv}</b><span>total lifted</span></div>
+      <div class="stat"><b>${o.w7}</b><span>walk min, 7 days</span></div>
+    </div>
+    <div class="dots" title="Last 14 days — filled = trained">${dots}</div>
+    <p class="small muted">Last workout: ${o.last ? lastAgo(o.last) : "none yet"}${stale ? " · their code is a few days old — ask for a fresh one" : ""}</p>
+  </div>`;
+}
+function renderFriends(el) {
+  const s = state.settings, friends = state.friends || [];
+  el.innerHTML = `<h1>Friends</h1>
+  <div class="card profile">
+    <h2>My profile</h2>
+    <div class="grid2">
+      <label>Name<input id="p-name" maxlength="24" value="${esc(s.name || "")}" placeholder="Your first name"></label>
+      <div><span class="small muted">Avatar</span><div class="emo">${EMOJIS.map((e) => `<button class="emo-btn ${s.emoji === e ? "on" : ""}" data-emo="${e}" aria-label="Avatar ${e}">${e}</button>`).join("")}</div></div>
+    </div>
+    <h3 class="sub">Share my progress</h3>
+    <p class="small muted">Copy your code and send it to your friend or partner. They paste it in their Friends tab to see how you're doing. Re-share after you train to update it.</p>
+    <textarea id="p-code" readonly rows="3" class="code">${myCode()}</textarea>
+    <div class="row"><button class="primary" id="p-copy">Copy my code</button></div>
+  </div>
+  <div class="card">
+    <h2>Add a friend</h2>
+    <p class="small muted">Paste their code. A newer code from the same person updates their card.</p>
+    <textarea id="f-paste" rows="3" placeholder="Paste FR1.… code here" class="code"></textarea>
+    <div class="row"><button class="primary" id="f-add">Add friend</button><span id="f-msg" class="small muted" role="status"></span></div>
+  </div>
+  ${friends.length ? friends.map(friendCard).join("") : `<p class="muted center">No friends added yet. Once they send you their code, their progress shows up here.</p>`}`;
+
+  el.onclick = (e) => {
+    const emo = e.target.closest("[data-emo]");
+    if (emo) { s.emoji = emo.dataset.emo; save(); return renderFriends(el); }
+    const un = e.target.closest("[data-unfriend]");
+    if (un && confirm("Remove this friend?")) { state.friends = state.friends.filter((f) => f.id !== un.dataset.unfriend); save(); return renderFriends(el); }
+    if (e.target.closest("#p-copy")) {
+      const t = $("#p-code");
+      const done = () => toast("Code copied — send it to them 📤", 2000);
+      if (navigator.clipboard) navigator.clipboard.writeText(t.value).then(done, () => { t.select(); toast("Select the code and copy it"); });
+      else { t.select(); toast("Select the code and copy it"); }
+    }
+    if (e.target.closest("#f-add")) {
+      const msg = $("#f-msg");
+      try {
+        const o = parseCode($("#f-paste").value);
+        if (o.id === profileId()) throw new Error("That's your own code — send it to a friend instead.");
+        state.friends = (state.friends || []).filter((f) => f.id !== o.id).concat({ id: o.id, data: o, added: Date.now() });
+        save(); toast(`${o.n} added ✅`); renderFriends(el);
+      } catch (err) { msg.textContent = err.message; msg.style.color = "var(--bad)"; }
+    }
+  };
+  el.onchange = (e) => {
+    if (e.target.id === "p-name") { s.name = e.target.value.trim(); save(); renderFriends(el); }
   };
 }
 

@@ -14,7 +14,7 @@
   <link rel="icon" href="icons/icon-192.png">
   <link rel="manifest" href="manifest.webmanifest">
   <title>FirstRep</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=43">
   <script type="importmap">{ "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
@@ -29,6 +29,7 @@
       <a href="#plan"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg><span>Plan</span></a>
       <a href="#exercises"><svg viewBox="0 0 24 24"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/></svg><span>Exercises</span></a>
       <a href="#progress"><svg viewBox="0 0 24 24"><path d="M5 20v-8M11 20V5M17 20v-5M3 20h18"/></svg><span>Progress</span></a>
+      <a href="#friends"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M16 4.8a3.2 3.2 0 0 1 0 6.4M18.5 14.8c1.9.8 3 2.7 3 5.2"/></svg><span>Friends</span></a>
       <a href="#settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg><span>Settings</span></a>
     </nav>
   </header>
@@ -55,16 +56,21 @@
   <!-- off-screen home for the 3D canvas; it moves into the guide when one is open -->
   <div id="fig3d-holder" aria-hidden="true"><canvas id="fig3d"></canvas></div>
 
-  <script src="data.js"></script>
-  <script src="anim.js"></script>
-  <script src="program.js"></script>
-  <script src="app.js"></script>
+  <script src="data.js?v=43"></script>
+  <script src="anim.js?v=43"></script>
+  <script src="program.js?v=43"></script>
+  <script src="app.js?v=43"></script>
   <script type="module">
     // Load the 3D mannequin; render start/finish thumbnails once, then upgrade the page.
     // If WebGL or the CDN is unavailable, the 2D figures from anim.js stay in place.
-    import { createViewer } from "./three-fig.js";
+    import { createViewer } from "./three-fig.js?v=43";
+    import { getCharacterUrl, saveCharacter, clearCharacter } from "./character.js?v=43";
+    window.CharStore = { saveCharacter, clearCharacter };
     try {
-      const v = await createViewer(document.getElementById("fig3d"));
+      // the user's own uploaded character (kept in this browser only), if any
+      const ch = await getCharacterUrl();
+      window.CHAR_NAME = ch ? ch.name : "";
+      const v = await createViewer(document.getElementById("fig3d"), ch ? { customUrl: ch.url, customExt: ch.ext } : {});
       const thumbs = {};
       for (const id of Object.keys(ANIM)) { v.show(id); thumbs[id] = [v.snapshot(0), v.snapshot(1)]; }
       v.setActive(false);

@@ -22,6 +22,19 @@ No account, no server, no tracking — everything is stored in your browser.
   Falls back to 2D figures when WebGL or the network isn't available.
 - **Workout logger** — sets × reps × weight, "last time" numbers, automatic rest timer, personal bests.
 - **Progress** — streaks, 12-week calendar, per-exercise charts, bodyweight chart, history.
+- **Today's coach** — for your goal, it shows how much you've walked today (+10 / +20 / +30 min buttons)
+  and how much lifting to do. Get fit & lose fat aims for a 30-minute walk; build muscle counts walking as
+  a bonus. Sleep under 6 hours or high soreness gives an easier day (one set fewer per move). Reaching the
+  walk goal gives one set more on the first three moves; for build muscle, that also needs 7+ hours of
+  sleep and low soreness.
+- **Friends & partner progress** — no account and no server. Copy your share code (`FR1.…`) to a friend,
+  paste theirs into the Friends tab, and see their week's workouts, streak, total lifted, 7-day walking and a
+14-day activity strip. The
+  code holds only those numbers, never bodyweight, sleep, soreness or notes. It's a snapshot: they share
+  a new code when they want you to see fresh numbers.
+- **Your own 3D character** — Settings → *My 3D character* lets you upload your own Mixamo `.glb`/`.gltf`.
+  It's stored only in this browser (IndexedDB) and never uploaded. Mixamo doesn't allow redistributing its
+  characters, so the public site can't include one.
 - **Phone & tablet ready** — bottom tab bar on iPhone, two-column layout on iPad,
   *Add to Home Screen* for a full-screen app.
 - Export / import your data as JSON.

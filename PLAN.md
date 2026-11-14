@@ -114,6 +114,22 @@ redistributed on their own — don't push `models/man.glb` to a public repo.
   Add to Home Screen: manifest + icons (`icons/`), opens full-screen.
 - On your phone: same Wi-Fi as the PC running `python -m http.server 5180`, open `http://<PC-IP>:5180`.
 
+**v0.9 — coach, friends, own character, UI check:**
+- Today's coach (`todayDose`, `coachCard`): walk goal per goal type (fit 30 min/day, muscle 10 min bonus),
+  +10/+20/+30 buttons and a minutes field, sleep and soreness autosave to the day's check-in. Dose is
+  `light` (sore ≥ 4 or sleep < 6 h), `big` (fit: walk goal met; muscle: 10+ min walk, sleep ≥ 7 h and sore ≤ 2),
+  or `standard`; a
+  started workout uses it (`doseSets`: light −1 set, floor 2; big +1 set on the first three moves).
+- Friends (`friendCard`, `renderFriends`): share codes `FR1.` + base64url JSON (v1), with only the progress
+  numbers. No server, so friends see a snapshot when the code is re-shared, not live data.
+- Own character (`character.js`): upload a Mixamo GLB/glTF in Settings. It's kept in IndexedDB on this
+  device and loaded before the bundled model, so Adam shows locally. The live site uses X Bot unless the user
+  uploads one. Mixamo's licence forbids redistribution, so `models/man.glb` stays local.
+- UI/UX check (`.claude/skills/ui-ux-check`): a reusable audit for tap targets, input size, overflow,
+  contrast and safe areas at 375/768/1280. Fixes from it: 44 px targets; text-safe accent and danger
+  colours; phone nav labels at 11 px with the active tab in blue (it was invisible as white); number fields
+  at 16 px so iOS doesn't zoom.
+
 ### Later (if v0.1 is useful)
 - Offline install (service worker) — needs HTTPS hosting, e.g. Cloudflare Pages.
 - Stronger muscle highlight on clothing (tint is subtle on the grey hoodie).
