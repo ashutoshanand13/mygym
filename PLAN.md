@@ -130,6 +130,19 @@ redistributed on their own — don't push `models/man.glb` to a public repo.
   colours; phone nav labels at 11 px with the active tab in blue (it was invisible as white); number fields
   at 16 px so iOS doesn't zoom.
 
+**v0.10 — rig tool (`tools/rig.html`):** turns an upright humanoid mesh (T-pose, facing +Z, right hand on −X)
+into a rigged GLB with the bone names the figure uses (`mixamorig:` prefix, stripped by the app).
+- Place 15 joints (the right side is placed; the left mirrors it): hips, spine ×3, neck, head, top of head, and
+  for the right arm and leg: shoulder/hip, elbow/knee, wrist/ankle, ball of foot, toe tip. Auto-place gives
+  anatomical guesses from the model's height and arm span, then the joints are dragged to fit.
+- Knuckle bones (`HandIndex1`, `HandPinky1`) are derived from the wrist; the figure's grip code needs them.
+- Build skins every vertex to its nearest four bone segments (inverse-distance weights). This is a first pass,
+  not Mixamo's learned weights, so joint areas (shoulders, hips) may need touch-up later.
+- Tested on Adam (`models/man.glb`, treated as unrigged): 27 bones, ~0.9 s to build, 17 MB export. The app's
+  guides pose the exported file correctly for a shoulder press and a goblet squat.
+- Not yet: dragging a joint in the browser has not been tested end to end (only the code path), no per-bone
+  weight painting, no finger chains beyond the knuckles.
+
 ### Later (if v0.1 is useful)
 - Offline install (service worker) — needs HTTPS hosting, e.g. Cloudflare Pages.
 - Stronger muscle highlight on clothing (tint is subtle on the grey hoodie).

@@ -64,6 +64,7 @@ Want a realistic person instead of the mannequin? See [models/README.md](models/
 | `three-fig.js` | 3D figure: poses a Mixamo-rigged character from the keyframes (three.js) |
 | `3d.html` | Stand-alone 3D preview of all exercises |
 | `tools/convert-fbx.html` | Converts a Mixamo FBX into a compact GLB |
+| `tools/rig.html` | Rig tool: place 15 joints on a humanoid mesh, build a skeleton and export a rigged GLB the app can pose |
 | `PLAN.md` | The training plan and design notes |
 
 ## Contributing

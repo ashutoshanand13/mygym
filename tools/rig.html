@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FirstRep rig tool</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #0f1115; color: #eef0f4;
+           display: grid; grid-template-columns: 300px 1fr; height: 100vh; height: 100dvh; }
+    aside { padding: 14px; overflow: auto; background: #181b22; border-right: 1px solid #2c313c; }
+    main { position: relative; min-width: 0; min-height: 0; }
+    #view { position: absolute; inset: 0; }
+    #view canvas { display: block; width: 100%; height: 100%; }
+    h1 { font-size: 1.1rem; margin: 0 0 8px; }
+    h3 { font-size: .95rem; margin: 16px 0 6px; }
+    p { margin: 6px 0; }
+    .small { font-size: .85rem; color: #9098a8; }
+    button { display: block; width: 100%; min-height: 44px; margin: 6px 0; padding: 8px 12px; border-radius: 10px; cursor: pointer;
+             border: 1px solid #2c313c; background: #20242d; color: #eef0f4; font: inherit; text-align: left; }
+    button.primary { background: #2f6fe8; border-color: #2f6fe8; color: #fff; font-weight: 600; text-align: center; }
+    button.on { outline: 2px solid #4f8cff; outline-offset: 1px; }
+    button:disabled { opacity: .45; cursor: default; }
+    label.file { display: block; margin: 6px 0; }
+    input[type=file] { font: inherit; color: #9098a8; max-width: 100%; }
+    #status { min-height: 3.2em; font-size: .9rem; color: #c7ccd6; }
+    .warn { color: #ffb86b; }
+    @media (max-width: 760px) {
+      body { grid-template-columns: 1fr; grid-template-rows: auto 52dvh; height: auto; }
+      aside { overflow: visible; border-right: 0; border-bottom: 1px solid #2c313c; }
+    }
+  </style>
+  <script type="importmap">{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  } }</script>
+</head>
+<body>
+  <aside>
+    <h1>FirstRep rig tool</h1>
+    <p class="small">Turns a humanoid mesh into a rigged GLB that the app can pose. Use a model that is upright, faces <b>+Z</b>, has its feet on the floor and its arms out in a T-pose. Its own right hand should be on the <b>−X</b> side.</p>
+    <label class="file">Load model (.glb, .gltf or .fbx)
+      <input id="file" type="file" accept=".glb,.gltf,.fbx">
+    </label>
+    <button id="sample">Use models/man.glb (test model)</button>
+    <h3>Joints</h3>
+    <p class="small">Click a joint, then drag its handle in the view. Left-side joints mirror the right side.</p>
+    <div id="joints"></div>
+    <button id="auto" disabled>Auto-place joints</button>
+    <button id="build" class="primary" disabled>Build rig (skin the mesh)</button>
+    <button id="export" disabled>Export rigged GLB</button>
+    <p id="status"></p>
+  </aside>
+  <main><div id="view"></div></main>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+    import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
+    import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { TransformControls } from "three/addons/controls/TransformControls.js";
+
+    // ----- bone set the app's figure needs (Mixamo names, prefix optional) -----
+    // [bone, parent]. Each bone's joint is its head; the parent's joint is where it starts.
+    const BONES = [
+      ["Hips", null], ["Spine", "Hips"], ["Spine1", "Spine"], ["Spine2", "Spine1"],
+      ["Neck", "Spine2"], ["Head", "Neck"], ["HeadTop_End", "Head"],
+    ];
+    for (const s of ["Right", "Left"]) BONES.push(
+      [s + "Arm", "Spine2"], [s + "ForeArm", s + "Arm"], [s + "Hand", s + "ForeArm"],
+      [s + "HandIndex1", s + "Hand"], [s + "HandPinky1", s + "Hand"], // knuckles, used by the figure's grip
+      [s + "UpLeg", "Hips"], [s + "Leg", s + "UpLeg"], [s + "Foot", s + "Leg"],
+      [s + "ToeBase", s + "Foot"], [s + "Toe_End", s + "ToeBase"]);
+    // Knuckles are not placed by hand: they sit just past the wrist, along the forearm's direction.
+    const DERIVED = ["RightHandIndex1", "RightHandPinky1"];
+    const CENTRE = ["Hips", "Spine", "Spine1", "Spine2", "Neck", "Head", "HeadTop_End"];
+    const RIGHT = ["RightArm", "RightForeArm", "RightHand", "RightUpLeg", "RightLeg", "RightFoot", "RightToeBase", "RightToe_End"];
+    const LABEL = {
+      Hips: "Hips — pelvis centre", Spine: "Waist", Spine1: "Lower chest", Spine2: "Upper chest (shoulder line)",
+      Neck: "Neck base", Head: "Head — ear level", HeadTop_End: "Top of head",
+      RightArm: "Right shoulder joint", RightForeArm: "Right elbow", RightHand: "Right wrist",
+      RightUpLeg: "Right hip joint", RightLeg: "Right knee", RightFoot: "Right ankle",
+      RightToeBase: "Right ball of foot", RightToe_End: "Right toe tip",
+    };
+    const HEIGHT = 1.75; // metres; the model is scaled to this, feet at y = 0
+
+    // ----- three.js scene -----
+    const $ = (id) => document.getElementById(id);
+    const status = (t, warn = false) => { $("status").textContent = t; $("status").className = warn ? "warn" : ""; };
+    const view = $("view");
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    view.append(renderer.domElement);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1b1f27);
+    const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 100);
+    camera.position.set(0, 1.2, 4.2);
+    const orbit = new OrbitControls(camera, renderer.domElement);
+    orbit.target.set(0, 0.9, 0); orbit.update();
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 2.2));
+    const key = new THREE.DirectionalLight(0xffffff, 2); key.position.set(2, 4, 3); scene.add(key);
+    scene.add(new THREE.GridHelper(4, 16, 0x3a4150, 0x2a2f3a));
+    const resize = () => { const w = view.clientWidth, h = view.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); };
+    new ResizeObserver(resize).observe(view); resize();
+    renderer.setAnimationLoop(() => renderer.render(scene, camera));
+
+    // ----- joints -----
+    const pos = new Map(); // centre + right joints (left ones are mirrored)
+    const handles = new Map();
+    const mirror = (v) => new THREE.Vector3(-v.x, v.y, v.z);
+    const getPos = (k) => {
+      if (k.startsWith("Left")) return mirror(getPos("Right" + k.slice(4)));
+      if (DERIVED.includes(k)) {
+        const hand = pos.get("RightHand"), out = hand.clone().sub(pos.get("RightForeArm")).normalize();
+        const H = HEIGHT, side = k.endsWith("Index1") ? 1 : -1;
+        return hand.clone().addScaledVector(out, 0.06 * H).add(new THREE.Vector3(0, 0, side * 0.02 * H));
+      }
+      return pos.get(k);
+    };
+    const ball = new THREE.SphereGeometry(0.028, 16, 12);
+    const addHandle = (k, color) => {
+      const m = new THREE.Mesh(ball, new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true }));
+      m.renderOrder = 10; m.userData.key = k; m.userData.draggable = color !== 0x888888;
+      scene.add(m); handles.set(k, m);
+    };
+    CENTRE.forEach((k) => addHandle(k, 0xffd166));
+    RIGHT.forEach((k) => addHandle(k, 0x4f8cff));
+    RIGHT.forEach((k) => addHandle("Left" + k.slice(5), 0x888888));
+    DERIVED.forEach((k) => { addHandle(k, 0x888888); addHandle("Left" + k.slice(5), 0x888888); });
+    CENTRE.concat(RIGHT).forEach((k) => pos.set(k, new THREE.Vector3()));
+
+    const lines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x4f8cff, depthTest: false, transparent: true, opacity: 0.8 }));
+    lines.renderOrder = 9; scene.add(lines);
+    const updateLines = () => {
+      const pts = [];
+      for (const [k, parent] of BONES) if (parent) pts.push(getPos(parent), getPos(k));
+      lines.geometry.dispose();
+      lines.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+    };
+    const syncAll = () => {
+      for (const [k, h] of handles) { const p = getPos(k); if (p) h.position.copy(p); }
+      updateLines();
+    };
+
+    const tc = new TransformControls(camera, renderer.domElement);
+    scene.add(tc.getHelper());
+    tc.addEventListener("dragging-changed", (e) => { orbit.enabled = !e.value; });
+    tc.addEventListener("objectChange", () => {
+      const h = handles.get(selected);
+      if (h && h.userData.draggable) { pos.get(selected).copy(h.position); syncAll(); invalidate(); }
+    });
+
+    let selected = null;
+    const select = (k) => {
+      selected = k;
+      const h = handles.get(k);
+      if (h && h.userData.draggable) tc.attach(h); else tc.detach();
+      document.querySelectorAll("#joints button").forEach((b) => b.classList.toggle("on", b.dataset.k === k));
+    };
+    const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+    renderer.domElement.addEventListener("pointerdown", (e) => {
+      const r = renderer.domElement.getBoundingClientRect();
+      ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      ray.setFromCamera(ptr, camera);
+      const hits = ray.intersectObjects([...handles.values()].filter((h) => h.userData.draggable), false);
+      if (hits.length) select(hits[0].object.userData.key);
+    });
+
+    const jointList = $("joints");
+    for (const k of CENTRE.concat(RIGHT)) {
+      const b = document.createElement("button");
+      b.dataset.k = k; b.textContent = LABEL[k];
+      b.onclick = () => select(k);
+      jointList.append(b);
+    }
+
+    // ----- model state -----
+    let model = null, bakedMeshes = [], bounds = null, built = null;
+    const invalidate = () => {
+      if (built) { scene.remove(built.root); built = null; }
+      $("export").disabled = true;
+      if (model) model.visible = true;
+    };
+
+    // Place every joint at an anatomical guess from the model's size and arm span.
+    const autoPlace = () => {
+      const H = HEIGHT, X = Math.max(0.2, bounds.max.x), HW = 0.09 * H;
+      const put = (k, x, y, z) => pos.set(k, new THREE.Vector3(x, y, z));
+      put("Hips", 0, 0.53 * H, 0); put("Spine", 0, 0.6 * H, 0); put("Spine1", 0, 0.68 * H, 0);
+      put("Spine2", 0, 0.76 * H, 0); put("Neck", 0, 0.83 * H, 0); put("Head", 0, 0.87 * H, 0);
+      put("HeadTop_End", 0, bounds.max.y, 0);
+      put("RightArm", -0.22 * X, 0.82 * H, 0); put("RightForeArm", -0.6 * X, 0.82 * H, 0); put("RightHand", -0.92 * X, 0.82 * H, 0);
+      put("RightUpLeg", -HW, 0.5 * H, 0); put("RightLeg", -HW, 0.27 * H, 0); put("RightFoot", -HW, 0.045 * H, 0);
+      put("RightToeBase", -HW, 0.01 * H, 0.09 * H); put("RightToe_End", -HW, 0.01 * H, 0.15 * H);
+      syncAll(); invalidate();
+      status("Joints placed from the model's size. Check each one, then build the rig.");
+    };
+
+    async function loadModel(url, name) {
+      status("Loading " + name + "…");
+      let root;
+      if (/\.fbx$/i.test(name)) root = await new FBXLoader().loadAsync(url);
+      else root = (await new GLTFLoader().loadAsync(url)).scene;
+      if (model) scene.remove(model);
+      if (built) { scene.remove(built.root); built = null; }
+      model = root;
+      scene.add(model);
+      model.updateMatrixWorld(true);
+
+      // Normalise: height 1.75 m, feet on the floor, centred on x and z.
+      let box = new THREE.Box3().setFromObject(model);
+      model.scale.multiplyScalar(HEIGHT / (box.max.y - box.min.y));
+      model.updateMatrixWorld(true);
+      box = new THREE.Box3().setFromObject(model);
+      model.position.x -= (box.min.x + box.max.x) / 2;
+      model.position.z -= (box.min.z + box.max.z) / 2;
+      model.position.y -= box.min.y;
+      model.updateMatrixWorld(true);
+      bounds = new THREE.Box3().setFromObject(model);
+
+      // Bake each mesh into model space, so the rig can be built without the old skeleton.
+      bakedMeshes = [];
+      let hadSkin = false;
+      model.traverse((o) => {
+        if (o.isSkinnedMesh) hadSkin = true;
+        if (o.isMesh) {
+          const g = o.geometry.clone();
+          g.applyMatrix4(o.matrixWorld);
+          bakedMeshes.push({ geometry: g, material: o.material, name: o.name || "Body" });
+        }
+      });
+      if (!bakedMeshes.length) throw new Error("No mesh found in this file.");
+
+      orbit.target.set(0, HEIGHT * 0.5, 0); orbit.update();
+      $("auto").disabled = false; $("build").disabled = false;
+      autoPlace();
+      status(`${name}: ${bakedMeshes.length} mesh part(s).` + (hadSkin ? " It already has a skeleton; the new rig replaces it." : ""), hadSkin);
+    }
+
+    // Distance from point p to segment a–b.
+    function segDist(p, a, b) {
+      const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+      const apx = p.x - a.x, apy = p.y - a.y, apz = p.z - a.z;
+      const L = abx * abx + aby * aby + abz * abz;
+      const t = L > 1e-12 ? Math.max(0, Math.min(1, (apx * abx + apy * aby + apz * abz) / L)) : 0;
+      const dx = apx - abx * t, dy = apy - aby * t, dz = apz - abz * t;
+      return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    // Build the skeleton from the joints, then weight every vertex to its nearest bones.
+    function build() {
+      if (!bakedMeshes.length) return;
+      if (built) scene.remove(built.root);
+      model.visible = false;
+
+      const root = new THREE.Group();
+      root.name = "FirstRepRig";
+      const bones = {};
+      for (const [k] of BONES) { const b = new THREE.Bone(); b.name = "mixamorig:" + k; bones[k] = b; }
+      for (const [k, parent] of BONES) {
+        if (parent) { bones[parent].add(bones[k]); bones[k].position.copy(getPos(k)).sub(getPos(parent)); }
+        else bones[k].position.copy(getPos(k));
+      }
+      root.add(bones.Hips);
+      root.updateMatrixWorld(true);
+      const skeleton = new THREE.Skeleton(BONES.map(([k]) => bones[k]));
+
+      // Each bone covers the segment from its joint to its first child (or a short stub at the tips).
+      const segs = BONES.map(([k, parent]) => {
+        const child = BONES.find(([, p]) => p === k);
+        const a = getPos(k);
+        if (child) return [a, getPos(child[0])];
+        const dir = parent ? a.clone().sub(getPos(parent)).normalize() : new THREE.Vector3(0, 1, 0);
+        return [a, a.clone().addScaledVector(dir, 0.05)];
+      });
+
+      let verts = 0;
+      const p = new THREE.Vector3();
+      for (const part of bakedMeshes) {
+        const geo = part.geometry;
+        const posAttr = geo.attributes.position, n = posAttr.count;
+        verts += n;
+        const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+        const cand = new Array(BONES.length);
+        for (let v = 0; v < n; v++) {
+          p.fromBufferAttribute(posAttr, v);
+          for (let i = 0; i < BONES.length; i++) cand[i] = [segDist(p, segs[i][0], segs[i][1]), i];
+          cand.sort((a, b) => a[0] - b[0]);
+          let total = 0;
+          const top = cand.slice(0, 4).map(([d, i]) => { const w = 1 / Math.pow(d + 0.02, 3); total += w; return [i, w]; });
+          top.forEach(([i, w], j) => { si[v * 4 + j] = i; sw[v * 4 + j] = w / total; });
+        }
+        geo.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(si, 4));
+        geo.setAttribute("skinWeight", new THREE.Float32BufferAttribute(sw, 4));
+        const sm = new THREE.SkinnedMesh(geo, part.material);
+        sm.name = part.name;
+        root.add(sm);
+        sm.bind(skeleton, new THREE.Matrix4());
+      }
+      scene.add(root);
+      built = { root, skeleton };
+      $("export").disabled = false;
+      status(`Rig built: ${BONES.length} bones, ${verts.toLocaleString()} vertices weighted. Check it moves the way you expect, then export.`);
+    }
+
+    async function exportGLB() {
+      if (!built) return null;
+      const glb = await new GLTFExporter().parseAsync(built.root, { binary: true });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([glb], { type: "model/gltf-binary" }));
+      a.download = "rigged.glb";
+      a.click();
+      status(`Exported rigged.glb (${(glb.byteLength / 1048576).toFixed(1)} MB).`);
+      return glb;
+    }
+
+    // ----- wiring -----
+    $("file").addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (f) loadModel(URL.createObjectURL(f), f.name).catch((err) => status("Could not load: " + err.message, true));
+    });
+    $("sample").onclick = () => loadModel("../models/man.glb", "man.glb").catch((err) => status("Could not load: " + err.message, true));
+    $("auto").onclick = () => autoPlace();
+    $("build").onclick = () => build();
+    $("export").onclick = () => exportGLB();
+
+    // For testing from the console: window.rig.pos holds the joint positions.
+    window.rig = { pos, getPos, build, exportGLB, autoPlace, get built() { return built; }, get model() { return model; } };
+    select("Hips");
+  </script>
+</body>
+</html>
