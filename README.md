@@ -50,7 +50,9 @@ python -m http.server 5180
 Open <http://localhost:5180>. On your phone (same Wi-Fi), open `http://<your-computer's-IP>:5180`.
 An internet connection is needed for the 3D figure (three.js and the model load from jsDelivr).
 
-Want a realistic person instead of the mannequin? See [models/README.md](models/README.md).
+The default figure is `assets/character.glb`. To use your own, upload a rigged GLB in Settings → *My 3D
+character*, or make one with [tools/rig.html](tools/rig.html). See [models/README.md](models/README.md) for
+the Mixamo option.
 
 ## Project layout
 
@@ -75,7 +77,10 @@ pose in `anim.js`), better poses, translations, accessibility fixes.
 ## Credits
 
 - [three.js](https://threejs.org) (MIT) for 3D rendering.
-- X Bot character from the three.js examples, originally from [Mixamo](https://www.mixamo.com) (Adobe).
+- X Bot character from the three.js examples, originally from [Mixamo](https://www.mixamo.com) (Adobe). Used as
+  the fallback if the default figure can't load.
+- Default figure `assets/character.glb`: a cartoon 3D man made for this project with AI tools (an AI-generated
+  image, then an image-to-3D model, rigged with `tools/rig.html`).
 
 ## Disclaimer
 

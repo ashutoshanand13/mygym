@@ -14,7 +14,7 @@
   <link rel="icon" href="icons/icon-192.png">
   <link rel="manifest" href="manifest.webmanifest">
   <title>FirstRep</title>
-  <link rel="stylesheet" href="styles.css?v=44">
+  <link rel="stylesheet" href="styles.css?v=45">
   <script type="importmap">{ "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
@@ -56,15 +56,15 @@
   <!-- off-screen home for the 3D canvas; it moves into the guide when one is open -->
   <div id="fig3d-holder" aria-hidden="true"><canvas id="fig3d"></canvas></div>
 
-  <script src="data.js?v=44"></script>
-  <script src="anim.js?v=44"></script>
-  <script src="program.js?v=44"></script>
-  <script src="app.js?v=44"></script>
+  <script src="data.js?v=45"></script>
+  <script src="anim.js?v=45"></script>
+  <script src="program.js?v=45"></script>
+  <script src="app.js?v=45"></script>
   <script type="module">
     // Load the 3D mannequin; render start/finish thumbnails once, then upgrade the page.
     // If WebGL or the CDN is unavailable, the 2D figures from anim.js stay in place.
-    import { createViewer } from "./three-fig.js?v=44";
-    import { getCharacterUrl, saveCharacter, clearCharacter } from "./character.js?v=44";
+    import { createViewer } from "./three-fig.js?v=45";
+    import { getCharacterUrl, saveCharacter, clearCharacter } from "./character.js?v=45";
     window.CharStore = { saveCharacter, clearCharacter };
     try {
       // the user's own uploaded character (kept in this browser only), if any

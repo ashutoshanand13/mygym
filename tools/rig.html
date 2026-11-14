@@ -43,6 +43,11 @@
       <input id="file" type="file" accept=".glb,.gltf,.fbx">
     </label>
     <button id="sample">Use models/man.glb (test model)</button>
+    <p class="small">Generate a simple figure (no file needed). Pick its colours yourself:</p>
+    <label class="small">Skin <input id="skin" type="color" value="#d9a882"></label>
+    <label class="small">Hair <input id="hair" type="color" value="#3a2a20"></label>
+    <label class="small"><input id="beard" type="checkbox"> Beard</label>
+    <button id="generate">Generate a man</button>
     <h3>Joints</h3>
     <p class="small">Click a joint, then drag its handle in the view. Left-side joints mirror the right side.</p>
     <div id="joints"></div>
@@ -202,6 +207,11 @@
       let root;
       if (/\.fbx$/i.test(name)) root = await new FBXLoader().loadAsync(url);
       else root = (await new GLTFLoader().loadAsync(url)).scene;
+      setModel(root, name);
+    }
+
+    // Puts a loaded or generated figure into the scene, normalises it and places the joints.
+    function setModel(root, name) {
       if (model) scene.remove(model);
       if (built) { scene.remove(built.root); built = null; }
       model = root;
@@ -236,6 +246,60 @@
       $("auto").disabled = false; $("build").disabled = false;
       autoPlace();
       status(`${name}: ${bakedMeshes.length} mesh part(s).` + (hadSkin ? " It already has a skeleton; the new rig replaces it." : ""), hadSkin);
+    }
+
+    // A simple man built from primitives, so no licence applies. The colours and beard are chosen by the user
+    // in the tool; nothing about the figure is tied to a particular person or group. Right hand on −X,
+    // facing +Z, feet on the floor.
+    function generateMan(opt = {}) {
+      const g = new THREE.Group();
+      g.name = "GeneratedMan";
+      const std = (c, r = 0.75) => new THREE.MeshStandardMaterial({ color: c, roughness: r, metalness: 0 });
+      const SKIN = std(opt.skin ?? 0xd9a882, 0.6), HAIR = std(opt.hair ?? 0x3a2a20, 0.9), SHIRT = std(opt.shirt ?? 0x2f6fe8), PANTS = std(0x3b3f4a),
+            SHOE = std(0xf1f1f1, 0.5), EYE = std(0x151515, 0.3);
+      const V = (x, y, z) => new THREE.Vector3(x, y, z);
+      const blob = (r, x, y, z, m, sx = 1, sy = 1, sz = 1) => {
+        const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), m);
+        mesh.position.set(x, y, z); mesh.scale.set(sx, sy, sz); g.add(mesh); return mesh;
+      };
+      const limb = (a, b, r, m) => {
+        const d = new THREE.Vector3().subVectors(b, a), len = d.length();
+        const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.001, len - 2 * r), 6, 12), m);
+        mesh.position.copy(a).add(b).multiplyScalar(0.5);
+        mesh.quaternion.setFromUnitVectors(V(0, 1, 0), d.normalize());
+        g.add(mesh);
+      };
+      const H = HEIGHT, A = 0.75; // A = fingertip reach from the centre line; the joint guesses use the same ratios
+
+      // head, neck, eyes, hair and beard
+      blob(0.112, 0, 1.62, 0, SKIN, 0.92, 1.08, 1.0);
+      limb(V(0, 1.50, 0), V(0, 1.58, 0), 0.05, SKIN);
+      blob(0.118, 0, 1.66, -0.02, HAIR, 1.0, 0.62, 1.05);
+      if (opt.beard) blob(0.075, 0, 1.55, 0.05, HAIR, 1.05, 0.85, 0.85);
+      blob(0.012, -0.04, 1.635, 0.118, EYE); blob(0.012, 0.04, 1.635, 0.118, EYE);
+
+      // torso and hips
+      blob(0.16, 0, 1.20, 0, SHIRT, 1.25, 1.55, 0.8);
+      blob(0.14, 0, 0.94, 0, PANTS, 1.1, 0.85, 0.8);
+
+      for (const s of [-1, 1]) {
+        // arm: short sleeve, skin from mid-upper-arm, forearm, hand
+        const sh = V(s * 0.22 * A, 0.82 * H, 0), el = V(s * 0.6 * A, 0.82 * H, 0), wr = V(s * 0.92 * A, 0.82 * H, 0);
+        blob(0.058, sh.x, sh.y, sh.z, SHIRT);
+        const mid = sh.clone().lerp(el, 0.75);
+        limb(sh, mid, 0.056, SHIRT);
+        limb(mid, el, 0.046, SKIN);
+        limb(el, wr, 0.042, SKIN);
+        blob(0.035, wr.x + s * 0.04, wr.y, 0, SKIN, 1.6, 0.9, 1.1);
+
+        // leg: trousers to the ankle, white trainer
+        const hip = V(s * 0.09 * H, 0.5 * H, 0), knee = V(hip.x, 0.27 * H, 0), ankle = V(hip.x, 0.045 * H, 0);
+        limb(hip, knee, 0.088, PANTS);
+        limb(knee, ankle, 0.062, PANTS);
+        const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.25), SHOE);
+        shoe.position.set(hip.x, 0.035, 0.125); g.add(shoe);
+      }
+      return g;
     }
 
     // Distance from point p to segment a–b.
@@ -321,6 +385,10 @@
       if (f) loadModel(URL.createObjectURL(f), f.name).catch((err) => status("Could not load: " + err.message, true));
     });
     $("sample").onclick = () => loadModel("../models/man.glb", "man.glb").catch((err) => status("Could not load: " + err.message, true));
+    $("generate").onclick = () => {
+      const opt = { skin: parseInt($("skin").value.slice(1), 16), hair: parseInt($("hair").value.slice(1), 16), beard: $("beard").checked };
+      try { setModel(generateMan(opt), "Generated man"); } catch (err) { status("Could not generate: " + err.message, true); }
+    };
     $("auto").onclick = () => autoPlace();
     $("build").onclick = () => build();
     $("export").onclick = () => exportGLB();

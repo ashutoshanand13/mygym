@@ -48,6 +48,8 @@ export async function createViewer(canvas, opts = {}) {
   // sits in the project folder (local development only; git-ignored), then the default mannequin below.
   const sources = [];
   if (opts.customUrl) sources.push({ src: opts.customUrl, ext: opts.customExt || "glb" });
+  // The default character shipped with the app (a rigged GLB made for this project).
+  sources.push({ src: url("./assets/character.glb"), ext: "glb" });
   for (const f of ["man.glb", "man.fbx"]) sources.push({ src: url("./models/" + f), ext: f.slice(-3), local: true });
   for (const s of sources) {
     try {

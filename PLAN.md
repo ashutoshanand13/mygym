@@ -143,6 +143,11 @@ into a rigged GLB with the bone names the figure uses (`mixamorig:` prefix, stri
 - Not yet: dragging a joint in the browser has not been tested end to end (only the code path), no per-bone
   weight painting, no finger chains beyond the knuckles.
 
+**v0.11 — default character:** `assets/character.glb` is the default figure (a cartoon 3D man made with AI tools,
+rigged with `tools/rig.html`, 27 bones, textures 1024 px, 11.8 MB). The viewer loads: the user's own upload →
+`assets/character.glb` → `models/man.*` (local only) → X Bot. Tested: shoulder press and goblet squat pose, no errors.
+Open items: the file is large for a phone on mobile data, so a smaller geometry (fewer vertices) would help.
+
 ### Later (if v0.1 is useful)
 - Offline install (service worker) — needs HTTPS hosting, e.g. Cloudflare Pages.
 - Stronger muscle highlight on clothing (tint is subtle on the grey hoodie).

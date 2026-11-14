@@ -533,7 +533,7 @@ function renderSettings(el) {
     <div class="chips">${DAY_NAMES.map((d, i) => `<label class="chip"><input type="checkbox" value="${i}" data-day ${st.days.includes(i) ? "checked" : ""}><span>${d}</span></label>`).join("")}</div>
     <label>Bodyweight (kg)<input type="number" step="0.1" id="s-bw" value="${st.bodyweight ?? ""}"></label></div>
   <div class="card"><h2>My 3D character</h2>
-    <p class="muted small">${window.CHAR_NAME ? `Using your own model: <b>${esc(window.CHAR_NAME)}</b>. It's kept only in this browser and never uploaded.` : "The app shows the default mannequin. Upload your own Mixamo character (.glb or .fbx) to use a realistic person. It's kept only in this browser and never uploaded."}</p>
+    <p class="muted small">${window.CHAR_NAME ? `Using your own model: <b>${esc(window.CHAR_NAME)}</b>. It's kept only in this browser and never uploaded.` : "The app shows the default figure. Upload your own Mixamo character (.glb or .fbx) to use a realistic person. It's kept only in this browser and never uploaded."}</p>
     <div class="row"><label class="ghost btnlike">Upload character<input type="file" id="s-char" accept=".glb,.gltf,.fbx" hidden></label>${window.CHAR_NAME ? `<button class="ghost" id="s-char-reset">Use default</button>` : ""}</div>
     <p class="small muted">Get one free at mixamo.com. Mixamo lets you use its characters in your own projects, but not share the files, so keep this to your own device.</p></div>
   <div class="card"><h2>Backup</h2><p class="muted small">Data is stored only in this browser. Export now and then so you don't lose it.</p>
